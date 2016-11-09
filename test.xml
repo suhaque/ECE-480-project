@@ -10,22 +10,17 @@
     </components>
     <structure>
         <part type='series'>
-            <part type='parallel' k='1'>
-                <part type='part' infoID='0' partNum='0'></part>
-                <part type='part' infoID='1' partNum='1'></part>
-                <part type='part' infoID='2' partNum='2'></part>
-                <part type='parallel' k='1'>
-                    <part type='part' infoID='0' partNum='6'></part>
-                    <part type='part' infoID='1' partNum='7'></part>
-                    <part type='part' infoID='2' partNum='8'></part>
-                </part>
+            <part type='parallel' k='2'>
+                <part type='part' infoID='0'></part>
+                <part type='part' infoID='1'></part>
+                <part type='part' infoID='2'></part>
             </part>
             <part type='parallel' k='1'>
-                <part type='part' infoID='3' partNum='3'></part>
-                <part type='part' infoID='4' partNum='4'></part>
+                <part type='part' infoID='3'></part>
+                <part type='part' infoID='4'></part>
             </part>
             <part type='parallel' k='1'>
-                <part type='part' infoID='5' partNum='5'></part>
+                <part type='part' infoID='5'></part>
             </part>
         </part>
     </structure>

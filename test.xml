@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<root>
+    <components>
+        <part infoID='0' mft='1000' mrt='4'>e1</part>
+        <part infoID='1' mft='5000' mrt='4'>e2</part>
+        <part infoID='2' mft='2500' mrt='4'>e3</part>
+        <part infoID='3' mft='1300' mrt='4'>e4</part>
+        <part infoID='4' mft='2000' mrt='4'>e5</part>
+        <part infoID='5' mft='3000' mrt='4'>e6</part>
+    </components>
+    <structure>
+        <part type='series'>
+            <part type='parallel' k='1'>
+                <part type='part' infoID='0' partNum='0'></part>
+                <part type='part' infoID='1' partNum='1'></part>
+                <part type='part' infoID='2' partNum='2'></part>
+                <part type='parallel' k='1'>
+                    <part type='part' infoID='0' partNum='6'></part>
+                    <part type='part' infoID='1' partNum='7'></part>
+                    <part type='part' infoID='2' partNum='8'></part>
+                </part>
+            </part>
+            <part type='parallel' k='1'>
+                <part type='part' infoID='3' partNum='3'></part>
+                <part type='part' infoID='4' partNum='4'></part>
+            </part>
+            <part type='parallel' k='1'>
+                <part type='part' infoID='5' partNum='5'></part>
+            </part>
+        </part>
+    </structure>
+</root>

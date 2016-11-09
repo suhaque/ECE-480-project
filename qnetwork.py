@@ -18,6 +18,29 @@ import math
 # End Do
 # End For
 
+class Part(object):
+    'component object'
+    def __init__(self, partType, infoID=0, partNum=0, mft=0, mrt=0, label=0, state=['0'], KofN=1, reliability = 0):
+        self.partType = partType
+        self.infoID = infoID
+        self.partNum = partNum
+        self.mft = mft
+        self.mrt = mrt
+        self.label = label
+        self.state = state
+        self.KofN = KofN
+        self.reliability = reliability
+        self.children = []
+        self.number = 0
+    def append(self, child):
+        self.children.append(child)
+    def setNum(self, num):
+        self.number = num
+    def copy(self):
+        P = Part(self.partType, self.infoID, self.partNum, self.mft, self.mrt, self.label, self.state, self.KofN, self.reliability)
+        P.children = self.children
+        return P
+
 class QNetwork(object): # qnetwork class
     'Qnetwork class'
     def __init__(self, alpha=0.5, gamma=0.9): # constructor, alpha = learn rate, gamma = memory
@@ -103,10 +126,11 @@ class maintenance(object): # main class
     def __init__(self): # constructor
         # initialize stuff
         self.parts = 0
+        self.Tree = 0
         self.partcount = 0
         self.stateCount = 0
-        self.currentState = '0b0'
-        self.structureMap = 0
+        self.currentState = ['0']
+        self.structureMap = []
         self.fixTime = 0
         self.maxTime = 0
         self.states = 0
@@ -119,13 +143,15 @@ class maintenance(object): # main class
         parts = root.findall("structure//*[@type='part']") # get all structure parts
         self.stateCount = len(parts) # number of parts in structure
         # not including series and parallel groupings
-        self.__genPartList(components) # generate part list
-        self.__genStructureMap(parts) # generate structure mapping array
+        self.__genPartList(components, self.currentState) # generate part list
+        self.Tree = self.__genTree(structure) # generate part tree
+        #self.__genStructureMap(parts) # generate structure mapping array
         self.states = [0 for j in range(2**self.stateCount)] # initialize reliability array
         for i in range(2**self.stateCount): # increment through all states
-            self.currentState = bin(i)[2:][::-1] # convert state to binary
-            self.states[i] = self.__calcStates(structure) # calculate reliability for current state
-            #print(self.currentState,self.states[i])
+            #self.currentState[0] = bin(i)[2:][::-1] # convert state to binary
+            self.currentState[0] = bin(i)[2:][::-1] # convert state to binary
+            self.states[i] = self.__calcStates(self.Tree) # calculate reliability for current state
+            #print(self.currentState[0],self.states[i])
         self.__genRewards() # generate reward matrix
 
     def convert2Label(self,A): # convert part ID to part Label
@@ -133,7 +159,7 @@ class maintenance(object): # main class
         A[0] = bin(int(A[0]))[2:][::-1]
         for i in range(1,len(A)-1):
             j = self.structureMap[int(A[i])]
-            A[i] = self.parts[j][3]
+            A[i] = self.parts[j].label
         return A
 
     def __genRewards(self): # generate reward matrix
@@ -141,61 +167,73 @@ class maintenance(object): # main class
         for i in range(2**self.stateCount):
             for j in range(self.stateCount):
                 temp = i^2**j
-                self.rewards[i,temp] = self.states[temp] - self.states[i] - self.parts[self.structureMap[j]][2]/self.maxTime
+                self.rewards[i,temp] = self.states[temp] - self.states[i] - self.parts[self.structureMap[j]].mrt/self.maxTime
         self.rewards[2**self.stateCount-1][2**self.stateCount-1] = 1
 
-    def __genStructureMap(self, components): # generate structure array
-        partCount = len(components)
-        self.partcount = partCount
-        partlist = [0 for j in range(partCount)]
-        for part in components:
-            i = int(part.attrib['partNum'])
-            partlist[i] = int(part.attrib['infoID'])
-        self.structureMap = partlist
+    def __genTree(self, part, count=[0]):
+        if part.attrib['type']=='part': # if part
+            i = int(part.attrib['infoID'])
+            P = self.parts[i].copy()
+            P.setNum(count[0])
+            self.structureMap.append(i)
+            count[0] += 1
+            return P
+        elif part.attrib['type']=='series': # if series
+            P = Part(partType='series')
+            parts = part.findall('part')
+            for P1 in parts:
+                P.append(self.__genTree(P1, count))
+            return P
+        elif part.attrib['type']=='parallel': # if parallel
+            P = Part(partType='parallel', KofN = int(part.attrib['k']))
+            parts = part.findall('part')
+            for P1 in parts:
+                P.append(self.__genTree(P1, count))
+            return P
 
-    def __genPartList(self, components): # generate list of parts
+
+
+    def __genPartList(self, components, state): # generate list of parts
         partCount = len(components)
         self.partcount = partCount
-        partlist = [[0 for i in range(4)] for j in range(partCount)]
+        partlist = []
         self.fixTime = 0
         self.maxTime = 0
+        #def __init__(self, partType, infoID=0, mft=0, mrt=0, label=0, state=['0'], KofN=1):
         for part in components:
-            i = int(part.attrib['infoID'])
-            partlist[i][1] = float(part.attrib['mft'])
-            partlist[i][2] = float(part.attrib['mrt'])
-            if partlist[i][2] > self.maxTime:
-                self.maxTime = partlist[i][2]
-            self.fixTime += partlist[i][2]
-            partlist[i][3] = part.text
-        for part in components:
-            i = int(part.attrib['infoID'])
-            partlist[i][0] = math.exp(-self.fixTime/partlist[i][1])
+            partlist.append(Part(partType='part',
+                                 infoID=int(part.attrib['infoID']),
+                                 mft=float(part.attrib['mft']),
+                                 mrt=float(part.attrib['mrt']),
+                                 label=part.text,
+                                 state=state))
+            if float(part.attrib['mrt']) > self.maxTime:
+                self.maxTime = float(part.attrib['mrt'])
+            self.fixTime += float(part.attrib['mrt'])
+        for part in partlist:
+            part.reliability = math.exp(-self.fixTime/part.mft)
         self.parts = partlist
 
 
     def __calcStates(self,part): # calculate state reliabilities 
-        if part.attrib['type']=='part': # if part
-            i = int(part.attrib['infoID'])
-            j = int(part.attrib['partNum'])
-            if j < len(self.currentState):
-                if self.currentState[j] == '1':
-                    return self.parts[i][0]
+        if part.partType == 'part': # if part
+            if part.number < len(self.currentState[0]):
+                if self.currentState[0][part.number] == '1':
+                    return part.reliability
                 else:
                     return 0.0
             else:
                 return 0.0
-        elif part.attrib['type']=='series': # if series
+        elif part.partType == 'series': # if series
             reliability = 1.0
-            parts = part.findall('part')
-            for p in parts:
+            for p in part.children:
                 reliability *= self.__calcStates(p)
                 if reliability == 0:
                     break
             return reliability
-        elif part.attrib['type']=='parallel': # if parallel
-            k = int(part.attrib['k'])
-            parts = part.findall('part')
-            n = len(parts)
+        elif part.partType == 'parallel': # if parallel
+            k = part.KofN
+            n = len(part.children)
             if n-k > k:
                 reliability = 0.0
                 for i in range(2**n-1):
@@ -203,17 +241,16 @@ class maintenance(object): # main class
                     state = bin(i)[2:][::-1]
                     active = 0
                     for L in range(len(state)):
-                        active += int(state[L])                   
+                        active += int(state[L])
                     if active < k:
                         for j in range(n):
                             if j < len(state):
-                                if state[j]=='1':
-                                    reliab *= self.__calcStates(parts[j])
+                                if state[j] == '1':
+                                    reliab *= self.__calcStates(part.children[j])
                                 else:
-                                    reliab *= 1.0-self.__calcStates(parts[j])
+                                    reliab *= 1.0-self.__calcStates(part.children[j])
                             else:
-                                reliab *= 1.0-self.__calcStates(parts[j])
-                        #print(state,reliab)
+                                reliab *= 1.0-self.__calcStates(part.children[j])
                         reliability += reliab
                 reliability = 1-reliability
             else:
@@ -223,17 +260,16 @@ class maintenance(object): # main class
                     state = bin(i)[2:][::-1]
                     active = 0
                     for L in range(len(state)):
-                        active += int(state[L])                   
+                        active += int(state[L])
                     if active >= k:
                         for j in range(n):
                             if j < len(state):
-                                if state[j]=='1':
-                                    reliab *= self.__calcStates(parts[j])
+                                if state[j] == '1':
+                                    reliab *= self.__calcStates(part.children[j])
                                 else:
-                                    reliab *= 1.0-self.__calcStates(parts[j])
+                                    reliab *= 1.0-self.__calcStates(part.children[j])
                             else:
-                                reliab *= 1.0-self.__calcStates(parts[j])
-                        #print(state,reliab)
+                                reliab *= 1.0-self.__calcStates(part.children[j])
                         reliability += reliab
             return reliability
 

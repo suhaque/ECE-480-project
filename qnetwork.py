@@ -4,6 +4,8 @@ import os
 from xml.etree import ElementTree
 import numpy as np
 import math
+import threading
+import regex as re
 # 1. stateet the gammaction parameter, and environment rewardstate in matrix reward.
 # 2. Initialize matrix Q to zero.
 # 3. For each episode:
@@ -58,7 +60,11 @@ class QNetwork(object): # qnetwork class
         self.state = state # set initial state
 
     def train(self, cycles):
-        for n in range(cycles):#training cycles
+        n = 0
+        while cycles[0]:#training cycles
+            n += 1
+            #if n%20000 == 0:
+                #print('train cycle ' + str(n))
             state = self.state #set current state
             r = ran.randint(1, 100) #get random number from 1-100
             if r > 30: # 70% of the time
@@ -90,7 +96,8 @@ class QNetwork(object): # qnetwork class
                 self.q_value[state, action])
                 # set next state
                 self.state = action
-    def search(self,state=0): # get fix path from state
+        return
+    def search(self, state=0): # get fix path from state
         path = [state] # initial state
         cost = 0 # initial cost
         for i in range(self.count): # loop up to number of states
@@ -115,8 +122,37 @@ class QNetwork(object): # qnetwork class
                     break
         return None # if no path found return None
     #print q matrix
-    def print_q(self):
-        print str(self.q_value) + '\n'
+    def fromStr(self, string):
+        data = re.split('\n',string)
+        data1 = re.split(' ',data[0])
+        data2 = re.split(',',data[1])
+        data3 = re.split(',',data[2])
+        self.alpha = float(data1[0])
+        self.gamma = float(data1[1])
+        self.count = int(data1[2])
+        self.reward = np.zeros((self.count,self.count))
+        self.q_value = np.zeros((self.count,self.count))
+        for i in range(self.count):
+            if i == 63:
+                print('here')
+            for j in range(self.count):
+                self.q_value[i,j] = float(data2[self.count*i+j])
+                self.reward[i,j] = float(data3[self.count*i+j])
+    def toStr(self):
+        shape = self.q_value.shape
+        out = str(self.alpha)+' '+str(self.gamma)+' '+str(self.count)+'\n'
+        nums = []
+        for i in self.q_value:
+            for j in i:
+                nums.append(str(j))
+        out += ','.join(nums)+'\n'
+        shape = self.reward.shape
+        nums = []
+        for i in self.reward:
+            for j in i:
+                nums.append(str(j))
+        out += ','.join(nums)
+        return out
 
 
 
@@ -125,18 +161,40 @@ class maintenance(object): # main class
     'Overall Maintenance class'
     def __init__(self): # constructor
         # initialize stuff
-        self.parts = 0
-        self.Tree = 0
-        self.partcount = 0
-        self.stateCount = 0
+        self.parts = None
+        self.Tree = None
+        self.partcount = None
+        self.stateCount = None
         self.currentState = ['0']
         self.structureMap = []
-        self.fixTime = 0
-        self.maxTime = 0
-        self.states = 0
-        self.rewards = 0
-
-    def getStructure(self,Filename): # get structure file to parse
+        self.train = [True]
+        self.fixTime = None
+        self.maxTime = None
+        self.states = None
+        self.rewards = None
+        self.qnetwork = None
+        self.q_thread = None
+        self.file = None
+    def saveQ(self, filename):
+        self.train[0] = False
+        self.q_thread.join()
+        self.file = open(filename,'w')
+        self.file.write(self.qnetwork.toStr())
+        self.file.close()
+        self.train[0] = True
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
+        self.q_thread.start()
+    def loadQ(self, filename):
+        self.train[0] = False
+        self.q_thread.join()
+        self.file = open(filename,'r')
+        string = self.file.read()
+        self.qnetwork.fromStr(string)
+        self.file.close()
+        self.train[0] = True
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
+        self.q_thread.start()
+    def setStructure(self,Filename): # get structure file to parse
         root = ElementTree.parse(Filename) # parse xml file
         components = root.findall('components/part') # get components
         structure = root.find('structure/part') # get structure
@@ -153,15 +211,39 @@ class maintenance(object): # main class
             self.states[i] = self.__calcStates(self.Tree) # calculate reliability for current state
             #print(self.currentState[0],self.states[i])
         self.__genRewards() # generate reward matrix
+        self.qnetwork = QNetwork()
+        self.qnetwork.init_network(self.rewards)
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
+        self.q_thread.start()
 
     def convert2Label(self,A): # convert part ID to part Label
+
         A = A.tolist()
         A[0] = bin(int(A[0]))[2:][::-1]
         for i in range(1,len(A)-1):
             j = self.structureMap[int(A[i])]
-            A[i] = self.parts[j].label
+            A[i] = (int(A[i]),self.parts[j].label)
         return A
-
+    def getFix(self,IDs):
+        self.train[0] = False
+        self.q_thread.join()
+        broken = ['1' for i in range(self.stateCount)]
+        for I in IDs:
+            broken[I] = '0'
+        state = int('0b'+''.join(broken[::-1]),2)
+        fix = self.qnetwork.search(state)
+        self.train[0] = True
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
+        self.q_thread.start()
+        return self.convert2Label(fix)
+    def printParts(self):
+        out1 = ""
+        out2 = ""
+        for i in range(self.stateCount):
+            out1 += '{0:<10}'.format(i)
+            out2 += '{0:<10}'.format(self.structureMap[i])
+        print out1
+        print out2
     def __genRewards(self): # generate reward matrix
         self.rewards = np.array([[np.nan for j in range(2**self.stateCount)] for i in range(2**self.stateCount)])
         for i in range(2**self.stateCount):
@@ -275,18 +357,71 @@ class maintenance(object): # main class
 
 
         else: print 'Error ****** Unknown part type ******'
+def printPrompt():
+    print '{0:*^50}'.format('Accepted Commands')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('EXIT', 'Close Program', 'EXAMPLE: EXIT')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('FIX <Part_ID> <Part_ID> ...', 'Calculates best fix order', 'EXAMPLE: FIX 8 4 2 4 6 ...')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('GEN <location\\filename.txt>', 'Generates new system from xml file', 'EXAMPLE: GEN \'C:\\Users\\Username\\Documents\\Project\\filename.txt\'')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('HELP','Show this help screen', 'EXAMPLE: HELP')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('LOAD <location\\filename.dat>', 'Load trained system', 'EXAMPLE: LOAD \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('PARTS', 'Lists system parts and IDs', 'EXAMPLE: PARTS')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('SAVE <location\\filename.dat>', 'Save trained system', 'EXAMPLE: SAVE \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
+maint = None
+run = True
+printPrompt()
+while(run):
+    try:
+        In = raw_input('Input >> ')
+        In = re.findall("'.+'|^\w+$|(?<=\s)\w+$|^\w+(?=\s)|(?<=\s)\w+(?=\s)",In)
+        if len(In) == 0:
+            pass
+        elif In[0].upper() == 'EXIT':
+            if maint != None:
+                maint.saveQ('autosave.dat')
+            run = False
+        elif In[0].upper() == 'FIX':
+            if maint == None:
+                raise Exception('System not loaded')
+            elif len(In) > 1:
+                IDs = []
+                for I in In[1:]:
+                    if maint.stateCount > int(I):
+                        IDs.append(int(I))
+                    else:
+                        raise Exception('Component Id does not exist')
+                print maint.getFix(IDs)
+            else:
+                raise Exception('FIX must have at least 1 part_ID')
+        elif In[0].upper() == 'GEN':
+            if len(In) == 2:
+                maint = maintenance()
+                maint.setStructure(In[1][1:-1])
+            else:
+                raise Exception('GEN only takes 2 arguments')
+        elif In[0].upper() == 'HELP':
+            printPrompt()
+        elif In[0].upper() == 'LOAD':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.loadQ(In[1][1:-1])
+        elif In[0].upper() == 'PARTS':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.printParts()
+        elif In[0].upper() == 'SAVE':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.saveQ(In[1][1:-1])
+        else:
+            print('{0:^150}'.format('Not a Valid Command'))
+    except Exception as inst:
+        print inst
+    finally:
+        if run == False and maint != None:
+            maint.train[0] = False
+            if not maint.file.closed:
+                maint.file.close()
+    #test = maintenance() # create maintenance object
+    #test.setStructure('test.xml') # load structure
 
-test = maintenance() # create maintenance object
-test.getStructure('test.xml') # load structure
-
-N = len(test.rewards) # set testing size
-
-A = QNetwork() # create qnetwork object
-A.init_network(test.rewards) # input reward matrix
-
-print 'start training'
-A.train(1000) # train for 1000 cycles
-print 'finished training'
-#A.print_q()
-for i in range(N): # output for all states
-    print  test.convert2Label(A.search(i))
+    #test.getFix([0,1,2])

@@ -5,7 +5,8 @@ from xml.etree import ElementTree
 import numpy as np
 import math
 import threading
-import regex as re
+import re
+import scipy.sparse as sps
 # 1. stateet the gammaction parameter, and environment rewardstate in matrix reward.
 # 2. Initialize matrix Q to zero.
 # 3. For each episode:
@@ -38,6 +39,24 @@ class Part(object):
         self.children.append(child)
     def setNum(self, num):
         self.number = num
+    def isActive(self, state):
+        if self.partType == 'part':
+            if self.number < len(state[0]):
+                return state[0][self.number] == '1'
+            return False
+        if self.partType == 'series':
+            for child in self.children:
+                if not child.isActive(state):
+                    return False
+            return True
+        if self.partType == 'parallel':
+            count = 0
+            for child in self.children:
+                if child.isActive(state):
+                    count += 1
+            if count >= self.KofN:
+                return True
+            return False
     def copy(self):
         P = Part(self.partType, self.infoID, self.partNum, self.mft, self.mrt, self.label, self.state, self.KofN, self.reliability)
         P.children = self.children
@@ -49,109 +68,121 @@ class QNetwork(object): # qnetwork class
         self.alpha = alpha # set alpha
         self.gamma = gamma # set gamma
         self.count = 1 # initialize to something, I just chose 1
-        self.reward = np.zeros((1,1)) # initialize numpy arrays for reward and q_value matrix
-        self.q_value = np.zeros((1,1))
+        self.reward = None # initialize numpy arrays for reward and q_value matrix
+        self.q_value = None
         self.state = 0 # set state to 0
 
     def init_network(self, reward, state=0): # initialize network
-        self.count = len(reward[0, :]) # number of states
+        self.count = reward.shape[0] # number of states
         self.reward = reward # set reward matrix
-        self.q_value = np.zeros(reward.shape) # set Q value matrix
+        self.q_value = sps.lil_matrix(reward.shape) # set Q value matrix
         self.state = state # set initial state
 
     def train(self, cycles):
         n = 0
         while cycles[0]:#training cycles
             n += 1
-            #if n%20000 == 0:
-                #print('train cycle ' + str(n))
             state = self.state #set current state
             r = ran.randint(1, 100) #get random number from 1-100
             if r > 30: # 70% of the time
-                actions = np.argsort(self.reward[state, :],kind='mergesort')[::-1] # get indices of self.reward sorted in descending order
-                for action in actions: # iterate through indices to find
-                    if not np.isnan(self.reward[state, action]): # first reward that isn't NAN
-                        break
+                actions = np.argsort(self.q_value[state, :].toarray(),kind='mergesort')[0][::-1]
+                action = actions[self.reward[state, actions].toarray(0)[0] != 0][0]
                 # increment Q value  -  multiline
                 self.q_value[state, action] = self.q_value[state, action] + \
                 self.alpha*(self.reward[state, action] + \
-                self.gamma*np.max(self.q_value[action, :]) - \
+                self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                 self.q_value[state, action])
                 if state == action: # test if next state is the same as the current state
-                    self.state = ran.randint(0, self.count-1)
+                    action = ran.randint(0, self.count-1)
                 self.state = action# set next state
             else: # 30% of the time
-                action = ran.randint(0, self.count-1) # get random action
-                cap = 0 # initialize loop counter
-                while np.isnan(self.reward[state, action]) and cap < 1000:# get random with reward != NAN
-                    action = ran.randint(0, self.count-1)
-                    cap += 1
-                if cap == 1000: # if no path exists, change state
+                indices = np.nonzero(self.reward[state, :].toarray()[0])[0]
+                if len(indices) == 0:
                     state = ran.randint(0, self.count-1)
                     continue
+                action = ran.randint(0, len(indices)-1) # get random action
+                action = indices[action]
                 # increment Q value
                 self.q_value[state, action] = self.q_value[state, action] + \
                 self.alpha*(self.reward[state, action] + \
-                self.gamma*np.max(self.q_value[action, :]) - \
+                self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                 self.q_value[state, action])
+                if state == action: # test if next state is the same as the current state
+                    action = ran.randint(0, self.count-1)
                 # set next state
                 self.state = action
         return
     def search(self, state=0): # get fix path from state
-        path = [state] # initial state
+        path = [] # component path
+        states = [state] # state path
         cost = 0 # initial cost
-        for i in range(self.count): # loop up to number of states
+        limit = int(math.log(self.count)/math.log(2))
+        for i in range(limit+1): # loop up to number of states
             # get the sorted indices of the row of the q matrix for the current state and reverse it
-            actions = np.argsort(self.q_value[state, :],kind='mergesort')[::-1]
-            for action in actions: # iterate through actions
-                if not np.isnan(self.reward[state, action]): # if reward for action is not NAN
-                    # increment Q value
-                    self.q_value[state, action] = self.q_value[state, action] + \
-                    self.alpha*(self.reward[state, action] + \
-                    self.gamma*np.max(self.q_value[action, :]) - \
-                    self.q_value[state, action])
-                    cost += self.reward[state, action] # add to cost
-                    if state == action:# if next state is the same as current state
-                    # found end of path
-                        return np.concatenate((path, [cost])) # return path and cost
-                    # from state and action
-                    # calcuate repaired part ID
-                    temp = int(math.log(action ^ state)/math.log(2)) 
-                    path.append(temp) # append part ID
-                    state = action # set next action
-                    break
+            test1 = self.q_value[state, :].toarray()[0]
+            test2 = self.reward[state, :].toarray()[0]
+            actions = np.argsort(self.q_value[state, :].toarray(),kind='mergesort')[0][::-1]
+            action = actions[self.reward[state, actions].toarray(0)[0] != 0][0]
+            # iterate through actions
+            # increment Q value
+            self.q_value[state, action] = self.q_value[state, action] + \
+            self.alpha*(self.reward[state, action] + \
+            self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
+            self.q_value[state, action])
+            cost += self.reward[state, action] # add to cost
+            if state == action:# if next state is the same as current state found end of path
+                return [path, states] # return path and cost
+            # from state and action
+            # calcuate repaired part ID
+            temp = int(math.log(action ^ state)/math.log(2)) 
+            path.append(temp) # append part ID
+            states.append(action)
+
+            state = action # set next action
         return None # if no path found return None
     #print q matrix
     def fromStr(self, string):
-        data = re.split('\n',string)
-        data1 = re.split(' ',data[0])
-        data2 = re.split(',',data[1])
-        data3 = re.split(',',data[2])
-        self.alpha = float(data1[0])
-        self.gamma = float(data1[1])
-        self.count = int(data1[2])
-        self.reward = np.zeros((self.count,self.count))
-        self.q_value = np.zeros((self.count,self.count))
-        for i in range(self.count):
-            if i == 63:
-                print('here')
-            for j in range(self.count):
-                self.q_value[i,j] = float(data2[self.count*i+j])
-                self.reward[i,j] = float(data3[self.count*i+j])
+        string = re.split('\n', string)
+        info = re.split(',', string[0])
+        alpha = float(info[0])
+        gamma = float(info[1])
+        count = int(info[2])
+        q_value_nonzero = np.array(re.split(',', string[1])).astype(float)
+        q_value_r = np.array(re.split(',', string[2])).astype(int)
+        q_value_c = np.array(re.split(',', string[3])).astype(int)
+        reward_nonzero = np.array(re.split(',', string[4])).astype(float)
+        reward_r = np.array(re.split(',', string[5])).astype(int)
+        reward_c = np.array(re.split(',', string[6])).astype(int)
+
+        self.alpha = alpha
+        self.gamma = gamma
+        self.count = count
+        self.reward = sps.coo_matrix((reward_nonzero, (reward_r, reward_c)), (count, count)).tocsr()
+        self.q_value = sps.coo_matrix((q_value_nonzero, (q_value_r, q_value_c)), (count, count)).tolil()
+
     def toStr(self):
-        shape = self.q_value.shape
-        out = str(self.alpha)+' '+str(self.gamma)+' '+str(self.count)+'\n'
-        nums = []
-        for i in self.q_value:
-            for j in i:
-                nums.append(str(j))
-        out += ','.join(nums)+'\n'
-        shape = self.reward.shape
-        nums = []
-        for i in self.reward:
-            for j in i:
-                nums.append(str(j))
-        out += ','.join(nums)
+        out = str(self.alpha)+','+str(self.gamma)+','+str(self.count)+'\n'
+
+        q_value = self.q_value.tocoo()
+        q_value_data = q_value.data
+        q_value_nonzero = q_value.nonzero()
+        q_value_r = q_value_nonzero[0]
+        q_value_c = q_value_nonzero[1]
+
+        out += ','.join(q_value_data.astype(str))+'\n'
+        out += ','.join(q_value_r.astype(str))+'\n'
+        out += ','.join(q_value_c.astype(str))+'\n'
+
+        reward = self.reward.tocoo()
+        reward_data = reward.data
+        reward_nonzero = reward.nonzero()
+        reward_r = reward_nonzero[0]
+        reward_c = reward_nonzero[1]
+
+        out += ','.join(reward_data.astype(str))+'\n'
+        out += ','.join(reward_r.astype(str))+'\n'
+        out += ','.join(reward_c.astype(str))+'\n'
+
         return out
 
 
@@ -194,7 +225,7 @@ class maintenance(object): # main class
         self.train[0] = True
         self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
         self.q_thread.start()
-    def setStructure(self,Filename): # get structure file to parse
+    def setStructure(self, Filename): # get structure file to parse
         root = ElementTree.parse(Filename) # parse xml file
         components = root.findall('components/part') # get components
         structure = root.find('structure/part') # get structure
@@ -216,15 +247,30 @@ class maintenance(object): # main class
         self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
         self.q_thread.start()
 
-    def convert2Label(self,A): # convert part ID to part Label
-
-        A = A.tolist()
-        A[0] = bin(int(A[0]))[2:][::-1]
-        for i in range(1,len(A)-1):
-            j = self.structureMap[int(A[i])]
-            A[i] = (int(A[i]),self.parts[j].label)
-        return A
-    def getFix(self,IDs):
+    def convert2Label(self, A): # convert part ID to part Label
+        output = '\n{0:^20} {1:^20} {2:^40}\n'.format('Current',
+                                                    'Current State',
+                                                    'Part to Fix')
+        output += '{0:^20} {1:^20} ({2:^20}, {3:^20})\n\n'.format('State',
+                                                               'Reliability',
+                                                               'Part Id',
+                                                               'Part Label')
+        for i in range(len(A[0])):
+            j = self.structureMap[int(A[0][i])]
+            current_state = bin(int(A[1][i]))[2:][::-1]
+            part_id = int(A[0][i])
+            part_label = self.parts[j].label
+            reliability = self.states[A[1][i]]
+            output += '{0:^20} {1:^20} ({2:^20}, {3:^20})\n'.format(current_state,
+                                                                    reliability,
+                                                                    part_id,
+                                                                    part_label)
+        i = len(A[0])
+        current_state = bin(int(A[1][i]))[2:][::-1]
+        reliability = self.states[A[1][i]]
+        output += '{0:^20} {1:^20}\n'.format(current_state, reliability)
+        return output
+    def getFix(self, IDs):
         self.train[0] = False
         self.q_thread.join()
         broken = ['1' for i in range(self.stateCount)]
@@ -235,7 +281,21 @@ class maintenance(object): # main class
         self.train[0] = True
         self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train,))
         self.q_thread.start()
-        return self.convert2Label(fix)
+        return fix
+    def evaluate(self, fix):
+        parts = fix[0]
+        states = fix[1]
+        total_score = 0
+        total_time = 0
+        for i in range(len(parts)):
+            reliab = self.states[states[i]]
+            reliab2 = self.states[states[i+1]]
+            time = self.parts[self.structureMap[parts[i]]].mrt
+            score = time * (reliab + reliab2) * 0.5
+            total_time += time
+            total_score += score
+        return total_score/total_time
+        print 'test'
     def printParts(self):
         out1 = ""
         out2 = ""
@@ -244,14 +304,32 @@ class maintenance(object): # main class
             out2 += '{0:<10}'.format(self.structureMap[i])
         print out1
         print out2
-    def __genRewards(self): # generate reward matrix
-        self.rewards = np.array([[np.nan for j in range(2**self.stateCount)] for i in range(2**self.stateCount)])
+    def __genRewards(self): # generate reward matrixs
+        rows = []
+        cols = []
+        data = []
+        maxim = None
         for i in range(2**self.stateCount):
             for j in range(self.stateCount):
-                temp = i^2**j
-                self.rewards[i,temp] = self.states[temp] - self.states[i] - self.parts[self.structureMap[j]].mrt/self.maxTime
-        self.rewards[2**self.stateCount-1][2**self.stateCount-1] = 1
-
+                temp = i^(2**j)
+                if temp > i:
+                    #val = -0.05
+                    rows.append(i)
+                    cols.append(temp)
+                    CONST = 1
+                    val = CONST*(self.states[temp] - self.states[i]) - self.parts[self.structureMap[j]].mrt/self.maxTime
+                    #val = 0.5*(self.states[temp] + self.states[i]) * self.parts[self.structureMap[j]].mrt/self.fixTime
+                    #if val == 0:
+                    #    val = 0.001
+                    if maxim == None or val > maxim:
+                        maxim = val
+                    data.append(val)
+        maxim *= 10
+        rows.append(2**self.stateCount-1)
+        cols.append(2**self.stateCount-1)
+        data.append(maxim)
+        self.rewards = sps.coo_matrix((data, (rows, cols)), dtype='f')
+        self.rewards = self.rewards.tocsr()
     def __genTree(self, part, count=[0]):
         if part.attrib['type']=='part': # if part
             i = int(part.attrib['infoID'])
@@ -297,25 +375,25 @@ class maintenance(object): # main class
         self.parts = partlist
 
 
-    def __calcStates(self,part): # calculate state reliabilities 
+    def __calcStates(self, part): # calculate state reliabilities 
         if part.partType == 'part': # if part
-            if part.number < len(self.currentState[0]):
-                if self.currentState[0][part.number] == '1':
-                    return part.reliability
-                else:
-                    return 0.0
+            if part.isActive(self.currentState):
+                return part.reliability
             else:
                 return 0.0
         elif part.partType == 'series': # if series
-            reliability = 1.0
-            for p in part.children:
-                reliability *= self.__calcStates(p)
-                if reliability == 0:
-                    break
-            return reliability
+            if part.isActive(self.currentState):
+                reliability = 1.0
+                for p in part.children:
+                    reliability *= self.__calcStates(p)
+                return reliability
+            else:
+                return 0.0
         elif part.partType == 'parallel': # if parallel
             k = part.KofN
             n = len(part.children)
+            if not part.isActive(self.currentState):
+                return 0.0
             if n-k > k:
                 reliability = 0.0
                 for i in range(2**n-1):
@@ -333,6 +411,8 @@ class maintenance(object): # main class
                                     reliab *= 1.0-self.__calcStates(part.children[j])
                             else:
                                 reliab *= 1.0-self.__calcStates(part.children[j])
+                            if reliab == 0:
+                                break
                         reliability += reliab
                 reliability = 1-reliability
             else:
@@ -352,6 +432,8 @@ class maintenance(object): # main class
                                     reliab *= 1.0-self.__calcStates(part.children[j])
                             else:
                                 reliab *= 1.0-self.__calcStates(part.children[j])
+                            if reliab == 0:
+                                break
                         reliability += reliab
             return reliability
 
@@ -366,18 +448,19 @@ def printPrompt():
     print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('LOAD <location\\filename.dat>', 'Load trained system', 'EXAMPLE: LOAD \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
     print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('PARTS', 'Lists system parts and IDs', 'EXAMPLE: PARTS')
     print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('SAVE <location\\filename.dat>', 'Save trained system', 'EXAMPLE: SAVE \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
+# Main Start
 maint = None
 run = True
 printPrompt()
 while(run):
     try:
-        In = raw_input('Input >> ')
-        In = re.findall("'.+'|^\w+$|(?<=\s)\w+$|^\w+(?=\s)|(?<=\s)\w+(?=\s)",In)
+        In = raw_input('\nInput >> ')
+        In = re.findall("'.+'|^\w+$|(?<=\s)\w+$|^\w+(?=\s)|(?<=\s)\w+(?=\s)", In)
         if len(In) == 0:
             pass
         elif In[0].upper() == 'EXIT':
             if maint != None:
-                maint.saveQ('autosave.dat')
+                maint.saveQ('autosave.dat')         
             run = False
         elif In[0].upper() == 'FIX':
             if maint == None:
@@ -389,7 +472,9 @@ while(run):
                         IDs.append(int(I))
                     else:
                         raise Exception('Component Id does not exist')
-                print maint.getFix(IDs)
+                fix = maint.getFix(IDs)
+                score = maint.evaluate(fix)
+                print 'Score: {}\n{}'.format(score, maint.convert2Label(fix))
             else:
                 raise Exception('FIX must have at least 1 part_ID')
         elif In[0].upper() == 'GEN':
@@ -419,9 +504,6 @@ while(run):
     finally:
         if run == False and maint != None:
             maint.train[0] = False
-            if not maint.file.closed:
-                maint.file.close()
-    #test = maintenance() # create maintenance object
-    #test.setStructure('test.xml') # load structure
-
-    #test.getFix([0,1,2])
+            if maint.file != None:
+                if not maint.file.closed:
+                    maint.file.close()

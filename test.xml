@@ -3,10 +3,14 @@
     <components>
         <part infoID='0' mft='1000' mrt='4'>e1</part>
         <part infoID='1' mft='5000' mrt='4'>e2</part>
-        <part infoID='2' mft='2500' mrt='40'>e3</part>
+        <part infoID='2' mft='2500' mrt='4'>e3</part>
         <part infoID='3' mft='1300' mrt='4'>e4</part>
-        <part infoID='4' mft='2000' mrt='40'>e5</part>
+        <part infoID='4' mft='2000' mrt='4'>e5</part>
         <part infoID='5' mft='3000' mrt='4'>e6</part>
+        <part infoID='6' mft='3000' mrt='4'>e7</part>
+        <part infoID='7' mft='3000' mrt='4'>e8</part>
+        <part infoID='8' mft='3000' mrt='4'>e9</part>
+        <part infoID='9' mft='3000' mrt='4'>e10</part>
     </components>
     <structure>
         <part type='series'>
@@ -15,19 +19,19 @@
                 <part type='part' infoID='1'></part>
                 <part type='part' infoID='2'></part>
                 <part type='series'>
-                    <part type='part' infoID='0'></part>
-                    <part type='part' infoID='1'></part>
-                    <part type='part' infoID='2'></part>
+                    <part type='part' infoID='6'></part>
+                    <part type='part' infoID='7'></part>
+                    <part type='part' infoID='8'></part>
                 </part>
-            </part>
-            <part type='parallel' k='1'>
-                <part type='part' infoID='0'></part>
-                <part type='part' infoID='1'></part>
-                <part type='part' infoID='2'></part>
             </part>
             <part type='parallel' k='1'>
                 <part type='part' infoID='3'></part>
                 <part type='part' infoID='4'></part>
+                <part type='series'>
+                    <part type='part' infoID='9'></part>
+                    <part type='part' infoID='7'></part>
+                    <part type='part' infoID='8'></part>
+                </part>
             </part>
             <part type='part' infoID='5'></part>
         </part>

@@ -633,3 +633,31 @@ class Slow_Brain(object):
         else:
             # no change
             print("status entry not valid ---ERROR---\n")
+
+class Fast_Brain(object):
+    
+    # class constructor
+    def __init__(self, MTBF_, reliability_, address_):
+        self.MTBF = MTBF_                                           # Mean Time Before Failure, get from main
+        self.priority = 0                                           # priority when in need of maintenance, 0 otherwise
+        self.status = 1                                             # status of component fast brain is implemented on, off or on
+        self.reliability = reliability_                             # reliability of the component
+        self.address = address_                                     # address of the component, 0 <= x < n
+        self.pastFixes = {}                                         # empty dictionary for past events. States --> priority
+        self.currentState = 0                                       # initialize to zero
+        
+    
+    def requestMaintenance(self, object):
+        # send the slow brain the address of the fast brain for maintenance
+        # object : Slow_Brain
+        for i in self.pastFixes:
+            if i == self.currentState:
+                self.priority = self.pastFixes[i].index(self.address) + 1
+            else:
+                object.receiveFailureInfo(self.address)
+    
+    def receivePriority(self, object):
+        fixlist, states = object.getfixorder(self)
+        self.currentState = states[0]
+        self.pastFixes[self.currentState] = fixlist
+        self.priority = fixlist.index(self.address) + 1

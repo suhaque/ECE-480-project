@@ -625,6 +625,8 @@ class Slow_Brain(object):
         print("Updating system state...\n")
         if status == 0 or status == 1:
             self.statusList[address] = status
+            if status == 1:
+                self.fixList.remove(address)
             revList = self.statusList[::-1]
             biNum = ''.join(revList.astype(str))
             self.currentState = int('0b'+biNum, 2)

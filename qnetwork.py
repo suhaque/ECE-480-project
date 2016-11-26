@@ -567,37 +567,28 @@ while(run):
                     maint.file.close()
 
 
+# class definition for the Slow_Brain
+# This class will handle the 'slow' computation and 'register' new events and scenarios
+import math
+import numpy as np
+
 class Slow_Brain(object):
     
     # the class constructor for class creation
     def __init__(self, state_reliability_table):
-        self.state_reliability = state_reliability_table        # this is a list with the index as the state and the content as the reliability of that state; get from main class                                # MTBF_n is a list, get from main class
+        self.state_reliability = state_reliability_table            # this is a list with the index as the state and the content as the reliability of that state; get from main class                                # MTBF_n is a list, get from main class
         self.N = int(math.log(len(state_reliability_table)+1,2))
-        self.current_state = 2**self.N-1      # current state of the system, everything working
-        self.fixList = Stack(self.N)                      # list of components that need fixing
-        self.fixOrder = []                                      # Ordered list of components to fix
-        self.statusList = np.ones(self.N, dtype = int)     # list of component statuses to determine state
+        self.current_state = 2**self.N-1                            # current state of the system, everything working
+        self.fixList = []                                           # list of components that need fixing
+        self.statusList = np.ones(self.N, dtype = int)              # list of component statuses to determine state
         
     
     def receiveFailureInfo(self, address):
         # address: component number that needs repair, 0 <= address <= N - 1
-        print("In RFI...\n")
-        self.fixList.push(address)
+        self.fixList.append(address)
         self.statusList[address] = 0                            # component not working, update the current state
-        self.updateState()
-        print("Leaving RFI...\n")
-        return self
-    
-    def updateState(self):
         # update current state after maintenance request
-        print("Updating system state...\n")
-        revList = self.statusList[::-1]
-        biNum = revList.astype(str)
-        #biNum = self.toString(revList)
-        self.currentState = int('0b'+biNum, 2)
-        # Now calculate fix order
-        self.getFixOrder()
-        print("Update state function complete...\n")
+        self.updateState(address, 0)
         return self
     
     def getFixOrder(self):
@@ -627,58 +618,16 @@ class Slow_Brain(object):
                 potenNextState += 1
         return([tempFixOut, state_steps])
     
-    def intToBinary(self, numIN):
-        out = np.zeros(self.N, dtype = int)
-        for i in range(self.N):
-            biVal = numIN % 2
-            numIN = numIN / 2
-            out[i] = biVal
-        out = out[::-1]
-        return out                              # numpy array output
-    
-    def toString(self, listIN):
-        output = ""
-        for i in listIN:
-            output = output + str(i)
-        return output
-    
-    def broadcastPriorities(self):
-        # return for definition
-        return self
-    
-
-class Stack(object):
-    
-    def __init__(self, N):
-        self.size = N
-        self.sptr = N
-        self.data = np.zeros(N, dtype = int)
-    
-    def isEmpty(self):
-        return size == sptr
-    
-    def isFull(self):
-        return sptr == 0
-    
-    def push(self, valIn):
-        if(self.isFull()):
-            print('Stack is full ---Error---\n')
+    def updateState(self, address, status):
+        # when a component is fixed the slow_brain will be notified and update its system
+        # address: component number (int)
+        # working: 0 off, 1 on
+        print("Updating system state...\n")
+        if status == 0 or status == 1:
+            self.statusList[address] = status
+            revList = self.statusList[::-1]
+            biNum = ''.join(revList.astype(str))
+            self.currentState = int('0b'+biNum, 2)
         else:
-            self.sptr = self.sptr - 1
-            self.data[self.sptr] = valIn
-    
-    def pop(self):
-        if(self.isEmpty()):
-            print('Stack is empty ---Error---\n')
-            return self.data[0]      # return garbage
-        else:
-            out = self.data[sptr]
-            self.sptr = self.sptr + 1
-            return out
-    
-    def peek(self):
-        if(self.isEmpty()):
-            print("Stack is empty ---Error---\n")
-            return self.data[0]
-        else:
-            return self.data[self.sptr]
+            # no change
+            print("status entry not valid ---ERROR---\n")

@@ -653,8 +653,8 @@ class Fast_Brain(object):
         for i in self.pastFixes:
             if i == self.currentState:
                 self.priority = self.pastFixes[i].index(self.address) + 1
-            else:
-                object.receiveFailureInfo(self.address)
+                return self
+        object.receiveFailureInfo(self.address)
     
     def receivePriority(self, object):
         fixlist, states = object.getfixorder(self)

@@ -7,6 +7,8 @@ import math
 import threading
 import re
 import scipy.sparse as sps
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 # 1. stateet the gammaction parameter, and environment rewardstate in matrix reward.
 # 2. Initialize matrix Q to zero.
 # 3. For each episode:
@@ -63,29 +65,37 @@ class Part(object):
 
 class QNetwork(object): # qnetwork class
     'Qnetwork class'
-    def __init__(self, alpha=0.9, gamma=1.0): # constructor, alpha = learn rate, gamma = memory
+    def __init__(self, alpha=0.0001, gamma=0.9, epsilon=30): # constructor, alpha = learn rate, gamma = memory
         self.alpha = alpha # set alpha
         self.gamma = gamma # set gamma
+        self.epsilon = epsilon
         self.count = 1 # initialize to something, I just chose 1
         self.reward = None # initialize numpy arrays for reward and q_value matrix
         self.q_value = None
         self.state = 0 # set state to 0
+        self.fixHist = None
 
     def init_network(self, reward, state=0): # initialize network
         self.count = reward.shape[0] # number of states
+        self.fixHist = [None for i in range(self.count)]
         self.reward = reward # set reward matrix
         self.q_value = sps.lil_matrix(reward.shape) # set Q value matrix
         self.state = state # set initial state
-
-    def train(self, cycles, mrts, maxtime, maxRel):
+    def train(self, cycles, mrts, maxtime, maxRel, evaluate):
         n = 0
         time = 0
+        init = True
         while cycles[0]:#training cycles
             n += 1
             state = self.state #set current state
+            if init:
+                startState = state
+                partPath = []
+                statePath = [state]
+                init = False
             r = ran.randint(1, 100) #get random number from 1-100
-            if r > 30: # 70% of the time
-                actions = np.argsort(self.q_value[state, :].toarray(),kind='mergesort')[0][::-1]
+            if r > self.epsilon: # 70% of the time
+                actions = np.argsort(self.q_value[state, :].toarray(), kind='mergesort')[0][::-1]
                 action = actions[self.reward[state, actions].toarray(0)[0] != 0][0]
                 # increment Q value  -  multiline
                 if state != action: # test if next state is the same as the current state
@@ -94,6 +104,8 @@ class QNetwork(object): # qnetwork class
                     self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                     self.q_value[state, action])
                     part = int(math.log(action ^ state, 2))
+                    partPath.append(part)
+                    statePath.append(action)
                     if time < maxtime:
                         time += mrts[part]
                 else:
@@ -101,7 +113,13 @@ class QNetwork(object): # qnetwork class
                     self.alpha*(self.reward[state, action] + maxRel*(maxtime - time)  + \
                     self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                     self.q_value[state, action])
+                    score = evaluate([partPath, statePath])
+                    if self.fixHist[startState] == None:
+                        self.fixHist[startState] = [[partPath, statePath], score]
+                    elif score > self.fixHist[startState][1]:
+                        self.fixHist[startState] = [[partPath, statePath], score]
                     r = ran.randint(1, 100) #get random number from 1-100
+                    init = True
                     if r > 10:
                         action = ran.randint(0, self.count-1)
                     else:
@@ -122,6 +140,8 @@ class QNetwork(object): # qnetwork class
                     self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                     self.q_value[state, action])
                     part = int(math.log(action ^ state, 2))
+                    partPath.append(part)
+                    statePath.append(action)
                     if time < maxtime:
                         time += mrts[part]
                 else:
@@ -129,7 +149,13 @@ class QNetwork(object): # qnetwork class
                     self.alpha*(self.reward[state, action] + maxRel*(maxtime - time)  + \
                     self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
                     self.q_value[state, action])
+                    score = evaluate([partPath, statePath])
+                    if self.fixHist[startState] == None:
+                        self.fixHist[startState] = [[partPath, statePath], score]
+                    elif score > self.fixHist[startState][1]:
+                        self.fixHist[startState] = [[partPath, statePath], score]
                     r = ran.randint(1, 100) #get random number from 1-100
+                    init = True
                     if r > 10:
                         action = ran.randint(0, self.count-1)
                     else:
@@ -138,54 +164,29 @@ class QNetwork(object): # qnetwork class
                 # set next state
                 self.state = action
         return
-    def search(self, maxtime, mrts, maxRel, state=0): # get fix path from state
-        time = 0
-        path = [] # component path
-        states = [state] # state path
-        #cost = 0 # initial cost
-        limit = int(math.log(self.count, 2))
-        for i in range(limit+1): # loop up to number of states
-            # get the sorted indices of the row of the q matrix for the current state and reverse it
-            test1 = self.q_value[state, :].toarray()[0]
-            test2 = self.reward[state, :].toarray()[0]
-            actions = np.argsort(self.q_value[state, :].toarray(),kind='mergesort')[0][::-1]
-            action = actions[self.reward[state, actions].toarray(0)[0] != 0][0]
-
-            if state == action:
-                return [path, states]
-            part = int(math.log(action ^ state, 2))
-            path.append(part)
-            states.append(action)
-            # if next state is the same as current state found end of path
-            # return path and cost
-            # from state and action
-            # calcuate repaired part ID
-            state = action # set next action
-
-            # iterate through actions
-            # increment Q value
-            #self.q_value[state, action] = self.q_value[state, action] + \
-            #self.alpha*(self.reward[state, action] + \
-            #self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
-            #self.q_value[state, action])
-            #cost += self.reward[state, action] # add to cost
- #           if state != action: # test if next state is the same as the current state
- #               self.q_value[state, action] = self.q_value[state, action] + \
- #               self.alpha*(self.reward[state, action] + \
- #               self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
- #               self.q_value[state, action])
- #               part = int(math.log(action ^ state, 2))
- #               path.append(part)
- #               states.append(action)
- #               if time < maxtime:
- #                   time += mrts[part]
- #           else:
- #               self.q_value[state, action] = self.q_value[state, action] + \
- #               self.alpha*(self.reward[state, action] + maxRel*(maxtime - time)  + \
- #               self.gamma*np.max(self.q_value[action, :].toarray()[0]) - \
- #               self.q_value[state, action])
- #               return [path, states]
-            
+    def search(self, maxtime, mrts, maxRel, evaluate, state=0):
+        # get fix path from state
+        if self.fixHist[state] == None:
+            time = 0
+            path = [] # component path
+            states = [state] # state path
+            #cost = 0 # initial cost
+            limit = int(math.log(self.count, 2))
+            for i in range(limit+1): # loop up to number of states
+                # get the sorted indices of the row of the q matrix
+                # for the current state and reverse it
+                actions = np.argsort(self.q_value[state, :].toarray(), kind='mergesort')[0][::-1]
+                action = actions[self.reward[state, actions].toarray(0)[0] != 0][0]
+                if state == action:
+                    score = evaluate([path, states])
+                    self.fixHist[states[0]] = [[path, states], score]
+                    return [path, states]
+                part = int(math.log(action ^ state, 2))
+                path.append(part)
+                states.append(action)
+                state = action # set next action
+        else:
+            return self.fixHist[state][0]
         return None # if no path found return None
     #print q matrix
     def fromStr(self, string):
@@ -231,10 +232,6 @@ class QNetwork(object): # qnetwork class
         out += ','.join(reward_c.astype(str))+'\n'
 
         return out
-
-
-
-
 class maintenance(object): # main class
     'Overall Maintenance class'
     def __init__(self): # constructor
@@ -250,6 +247,7 @@ class maintenance(object): # main class
         self.maxTime = None
         self.states = None
         self.rewards = None
+        self.backup = None
         self.qnetwork = None
         self.q_thread = None
         self.file = None
@@ -261,7 +259,7 @@ class maintenance(object): # main class
         self.file.write(self.qnetwork.toStr())
         self.file.close()
         self.train[0] = True
-        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], ))
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], self.evaluate, ))
         self.q_thread.start()
     def loadQ(self, filename):
         self.train[0] = False
@@ -271,9 +269,9 @@ class maintenance(object): # main class
         self.qnetwork.fromStr(string)
         self.file.close()
         self.train[0] = True
-        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], ))
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], self.evaluate, ))
         self.q_thread.start()
-    def setStructure(self, Filename): # get structure file to parse
+    def setStructure(self, Filename, alpha, gamma, epsilon): # get structure file to parse
         root = ElementTree.parse(Filename) # parse xml file
         components = root.findall('components/part') # get components
         structure = root.find('structure/part') # get structure
@@ -300,9 +298,10 @@ class maintenance(object): # main class
             self.states[i] = self.__calcStates(self.Tree) # calculate reliability for current state
             #print(self.currentState[0],self.states[i])
         self.__genRewards() # generate reward matrix
-        self.qnetwork = QNetwork()
+        self.backup = Backup(self.states, 2**self.stateCount)
+        self.qnetwork = QNetwork(alpha, gamma, epsilon)
         self.qnetwork.init_network(self.rewards)
-        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], ))
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], self.evaluate, ))
         self.q_thread.start()
 
     def convert2Label(self, A): # convert part ID to part Label
@@ -335,11 +334,18 @@ class maintenance(object): # main class
         for I in IDs:
             broken[I] = '0'
         state = int('0b'+''.join(broken[::-1]),2)
-        fix = self.qnetwork.search(self.fixTime, self.mrts, self.states[-1], state)
+        fix1 = self.qnetwork.search(self.fixTime, self.mrts, self.states[-1], self.evaluate, state)
+        fix2 = self.backup.search(state)
+        score1 = self.evaluate(fix1)
+        score2 = self.evaluate(fix2)
+        print 'Qnet Score:{0:<20} Backup Score:{1:<20}'.format(score1, score2)
         self.train[0] = True
-        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], ))
+        self.q_thread = threading.Thread(target=self.qnetwork.train,args=(self.train, self.mrts, self.fixTime, self.states[-1], self.evaluate, ))
         self.q_thread.start()
-        return fix
+        if score1 >= score2:
+            return [fix1, score1]
+        else:
+            return [fix2, score2]
     def evaluate(self, fix):
         parts = fix[0]
         states = fix[1]
@@ -355,12 +361,24 @@ class maintenance(object): # main class
         remain_score = (self.fixTime - total_time) * self.states[-1]
         return (total_score + remain_score)/self.fixTime
         print 'test'
+    def getGraph(self, fix):
+        parts = fix[0]
+        states = fix[1]
+        Xs = [0]
+        Ys = []
+        for i in range(len(parts)):
+            Xs.append(Xs[i] + self.mrts[parts[i]])
+        for i in range(len(states)):
+            Ys.append(self.states[states[i]])
+        Xs.append(self.fixTime)
+        Ys.append(self.states[states[-1]])
+        return [Xs, Ys]
     def printParts(self):
-        out1 = ""
-        out2 = ""
+        out1 = ''
+        out2 = ''
         for i in range(self.stateCount):
             out1 += '{0:<10}'.format(i)
-            out2 += '{0:<10}'.format(self.structureMap[i])
+            out2 += '{0:<10}'.format(self.parts[self.structureMap[i]].label)
         print out1
         print out2
     def __genRewards(self): # generate reward matrixs
@@ -497,102 +515,34 @@ class maintenance(object): # main class
 
 
         else: print 'Error ****** Unknown part type ******'
-def printPrompt():
-    print '{0:*^50}'.format('Accepted Commands')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('EXIT', 'Close Program', 'EXAMPLE: EXIT')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('FIX <Part_ID> <Part_ID> ...', 'Calculates best fix order', 'EXAMPLE: FIX 8 4 2 4 6 ...')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('GEN <location\\filename.txt>', 'Generates new system from xml file', 'EXAMPLE: GEN \'C:\\Users\\Username\\Documents\\Project\\filename.txt\'')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('HELP','Show this help screen', 'EXAMPLE: HELP')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('LOAD <location\\filename.dat>', 'Load trained system', 'EXAMPLE: LOAD \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('PARTS', 'Lists system parts and IDs', 'EXAMPLE: PARTS')
-    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('SAVE <location\\filename.dat>', 'Save trained system', 'EXAMPLE: SAVE \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
-# Main Start
-maint = None
-run = True
-printPrompt()
-while(run):
-    try:
-        In = raw_input('\nInput >> ')
-        In = re.findall("'.+'|^\w+$|(?<=\s)\w+$|^\w+(?=\s)|(?<=\s)\w+(?=\s)", In)
-        if len(In) == 0:
-            pass
-        elif In[0].upper() == 'EXIT':
-            if maint != None:
-                maint.saveQ('autosave.dat')         
-            run = False
-        elif In[0].upper() == 'FIX':
-            if maint == None:
-                raise Exception('System not loaded')
-            elif len(In) > 1:
-                IDs = []
-                for I in In[1:]:
-                    if maint.stateCount > int(I):
-                        IDs.append(int(I))
-                    else:
-                        raise Exception('Component Id does not exist')
-                fix = maint.getFix(IDs)
-                score = maint.evaluate(fix)
-                print 'Score: {}\n{}'.format(score, maint.convert2Label(fix))
-            else:
-                raise Exception('FIX must have at least 1 part_ID')
-        elif In[0].upper() == 'GEN':
-            if len(In) == 2:
-                maint = maintenance()
-                maint.setStructure(In[1][1:-1])
-            else:
-                raise Exception('GEN only takes 2 arguments')
-        elif In[0].upper() == 'HELP':
-            printPrompt()
-        elif In[0].upper() == 'LOAD':
-            if maint == None:
-                raise Exception('System not loaded')
-            maint.loadQ(In[1][1:-1])
-        elif In[0].upper() == 'PARTS':
-            if maint == None:
-                raise Exception('System not loaded')
-            maint.printParts()
-        elif In[0].upper() == 'SAVE':
-            if maint == None:
-                raise Exception('System not loaded')
-            maint.saveQ(In[1][1:-1])
-        else:
-            print('{0:^150}'.format('Not a Valid Command'))
-    except Exception as inst:
-        print inst
-    finally:
-        if run == False and maint != None:
-            maint.train[0] = False
-            if maint.file != None:
-                if not maint.file.closed:
-                    maint.file.close()
 
 
-# class definition for the Slow_Brain
-# This class will handle the 'slow' computation and 'register' new events and scenarios
-import math
-import numpy as np
-
+class Backup(object): # backup module
+    def __init__(self, state_reliability_table, state_count):
+        self.state_count = state_count
+        self.slow_brain = Slow_Brain(state_reliability_table)
+        self.fast_brain = Fast_Brain(state_count)
+    def search(self, state):
+        fix = self.fast_brain.getFixOrder(state)
+        if fix == None:
+            fix = self.slow_brain.getFixOrder(state)
+            self.fast_brain.add(state, fix)
+        return fix
 class Slow_Brain(object):
-    
     # the class constructor for class creation
     def __init__(self, state_reliability_table):
-        self.state_reliability = state_reliability_table            # this is a list with the index as the state and the content as the reliability of that state; get from main class                                # MTBF_n is a list, get from main class
+        # this is a list with the index as the state and the content as the reliability of that state; get from main class
+        self.state_reliability = state_reliability_table
         self.N = int(math.log(len(state_reliability_table)+1,2))
-        self.current_state = 2**self.N-1                            # current state of the system, everything working
-        self.fixList = []                                           # list of components that need fixing
-        self.statusList = np.ones(self.N, dtype = int)              # list of component statuses to determine state
-        
-    
-    def receiveFailureInfo(self, address):
-        # address: component number that needs repair, 0 <= address <= N - 1
-        self.fixList.append(address)
-        self.statusList[address] = 0                            # component not working, update the current state
-        # update current state after maintenance request
-        self.updateState(address, 0)
-        return self
-    
-    def getFixOrder(self):
+        # current state of the system, everything working
+        self.currentState = 2**self.N-1
+        # list of components that need fixing
+        self.fixList = []
+        # list of component statuses to determine state
+        self.statusList = np.ones(self.N, dtype = int)
+    def getFixOrder(self, state):
         #Tracer()()
+        self.currentState = state
         ordered_States = np.argsort(self.state_reliability)[::-1]
         potenNextState = 0
         tempFixOut = []
@@ -618,46 +568,144 @@ class Slow_Brain(object):
                 potenNextState += 1
         return([tempFixOut, state_steps])
     
-    def updateState(self, address, status):
-        # when a component is fixed the slow_brain will be notified and update its system
-        # address: component number (int)
-        # working: 0 off, 1 on
-        print("Updating system state...\n")
-        if status == 0 or status == 1:
-            self.statusList[address] = status
-            if status == 1:
-                self.fixList.remove(address)
-            revList = self.statusList[::-1]
-            biNum = ''.join(revList.astype(str))
-            self.currentState = int('0b'+biNum, 2)
-        else:
-            # no change
-            print("status entry not valid ---ERROR---\n")
 
 class Fast_Brain(object):
-    
     # class constructor
-    def __init__(self, MTBF_, reliability_, address_):
-        self.MTBF = MTBF_                                           # Mean Time Before Failure, get from main
-        self.priority = 0                                           # priority when in need of maintenance, 0 otherwise
-        self.status = 1                                             # status of component fast brain is implemented on, off or on
-        self.reliability = reliability_                             # reliability of the component
-        self.address = address_                                     # address of the component, 0 <= x < n
-        self.pastFixes = {}                                         # empty dictionary for past events. States --> priority
-        self.currentState = 0                                       # initialize to zero
-        
-    
-    def requestMaintenance(self, object):
-        # send the slow brain the address of the fast brain for maintenance
-        # object : Slow_Brain
-        for i in self.pastFixes:
-            if i == self.currentState:
-                self.priority = self.pastFixes[i].index(self.address) + 1
-                return self
-        object.receiveFailureInfo(self.address)
-    
-    def receivePriority(self, object):
-        fixlist, states = object.getfixorder(self)
-        self.currentState = states[0]
-        self.pastFixes[self.currentState] = fixlist
-        self.priority = fixlist.index(self.address) + 1
+    def __init__(self, state_count):
+        # empty dictionary for past events. States --> priority
+        self.pastFixes = [None for i in range(state_count)]    
+    def getFixOrder(self, state):
+        return self.pastFixes[state]
+    def add(self, state, fix):
+        self.pastFixes[state] = fix
+def printPrompt():
+    print '{0:*^50}'.format('Accepted Commands')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('ALPHA', 'Set Learning Rate (0.0-1.0)', 'EXAMPLE: ALPHA 0.1')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('CLEAR', 'Clear Graph History', 'EXAMPLE: CLEAR')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('EPSILON', 'Set Exporation rate (0-100)', 'EXAMPLE: EPSILON 0.1')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('EXIT', 'Close Program', 'EXAMPLE: EXIT')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('FIX <Part_ID> <Part_ID> ...', 'Calculates best fix order', 'EXAMPLE: FIX 8 4 2 4 6 ...')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('GAMMA', 'Set Future reward weight (0.0-1.0)', 'EXAMPLE: GAMMA 0.9')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('GEN <location\\filename.txt>', 'Generates new system from xml file', 'EXAMPLE: GEN \'C:\\Users\\Username\\Documents\\Project\\filename.txt\'')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('HELP','Show this help screen', 'EXAMPLE: HELP')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('LOAD <location\\filename.dat>', 'Load trained system', 'EXAMPLE: LOAD \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('PARTS', 'Lists system parts and IDs', 'EXAMPLE: PARTS')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('SAVE <location\\filename.dat>', 'Save trained system', 'EXAMPLE: SAVE \'C:\\Users\\Username\\Documents\\Project\\filename.dat\'')
+    print '{0:<50}\n\t{1:<50}\n\t{2:<50}'.format('SETTINGS', 'Display Current Alpha, Gamma, and Epsilon', 'EXAMPLE: SETTINGS')
+# # Main Start
+coords = []
+maint = None
+run = True
+printPrompt()
+alpha = 0.1
+gamma = 0.9
+epsilon = 30
+while(run):
+    try:
+        In = raw_input('\nInput >> ')
+        In = re.findall("'.+'|^\S+$|(?<=\s)\S+$|^\S+(?=\s)|(?<=\s)\S+(?=\s)", In)
+        if len(In) == 0:
+            pass
+        elif In[0].upper() == 'ALPHA':
+            if maint == None:
+                if float(In[1]) < 0 or float(In[1]) > 1:
+                    raise Exception('Epsilon out of range')
+                alpha = float(In[1])
+            elif len(In) == 2:
+                alpha = float(In[1])
+                if alpha < 0 or alpha > 1:
+                    raise Exception('Alpha out of range')
+                maint.qnetwork.alpha = alpha
+            else:
+                raise Exception('ALPHA takes 1 float argument')
+        elif In[0].upper() == 'CLEAR':
+            coords = []
+            print 'Graph Cleared'
+        elif In[0].upper() == 'EPSILON':
+            if maint == None:
+                if float(In[1]) < 0 or float(In[1]) > 100:
+                    raise Exception('Gamma out of range')
+                if float(In[1])%1 != 0:
+                    raise Exception('Gamma must be integer')
+                epsilon = int(In[1])
+            elif len(In) == 2:
+                epsilon = float(In[1])
+                if epsilon%1 != 0:
+                    raise Exception('Gamma must be integer')
+                epsilon = int(epsilon)
+                if epsilon < 0 or epsilon > 100:
+                    raise Exception('Gamma out of range')
+                maint.qnetwork.epsilon = epsilon
+            else:
+                raise Exception('GAMMA takes 1 float argument')
+        elif In[0].upper() == 'EXIT':
+            if maint != None:
+                maint.saveQ('autosave.dat')         
+            run = False
+        elif In[0].upper() == 'FIX':
+            if maint == None:
+                raise Exception('System not loaded')
+            elif len(In) > 1:
+                IDs = []
+                for I in In[1:]:
+                    if maint.stateCount > int(I):
+                        IDs.append(int(I))
+                    else:
+                        raise Exception('Component Id does not exist')
+                fix = maint.getFix(IDs)
+                score = fix[1]
+                fix = fix[0]
+                print maint.convert2Label(fix)
+                coords.append(maint.getGraph(fix))
+                plt.figure(1)
+                for coord in coords:
+                    plt.plot(coord[0], coord[1], '--')
+                plt.show()
+            else:
+                raise Exception('FIX must have at least 1 part_ID')
+        elif In[0].upper() == 'GAMMA':
+            if maint == None:
+                if float(In[1]) < 0 or float(In[1]) > 1:
+                    raise Exception('Gamma out of range')
+                gamma = float(In[1])
+            elif len(In) == 2:
+                gamma = float(In[1])
+                if gamma < 0 or gamma > 1:
+                    raise Exception('Gamma out of range')
+                maint.qnetwork.gamma = gamma
+            else:
+                raise Exception('GAMMA takes 1 int argument')
+        elif In[0].upper() == 'GEN':
+            if len(In) == 2:
+                maint = maintenance()
+                maint.setStructure(In[1][1:-1], alpha, gamma, epsilon)
+            else:
+                raise Exception('GEN only takes 2 arguments')
+        elif In[0].upper() == 'HELP':
+            printPrompt()
+        elif In[0].upper() == 'LOAD':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.loadQ(In[1][1:-1])
+        elif In[0].upper() == 'PARTS':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.printParts()
+        elif In[0].upper() == 'SAVE':
+            if maint == None:
+                raise Exception('System not loaded')
+            maint.saveQ(In[1][1:-1])
+        elif In[0].upper() == 'SETTINGS':
+            if maint == None:
+                raise Exception('System not loaded')
+            print 'Alpha:{0:<5} Gamma:{1:<5} Epsilon:{2:<5}'.format(maint.qnetwork.alpha, maint.qnetwork.gamma, maint.qnetwork.epsilon)
+        else:
+            print('{0:^150}'.format('Not a Valid Command'))
+    except Exception as inst:
+        print inst
+    finally:
+        if run == False and maint != None:
+            maint.train[0] = False
+            if maint.file != None:
+                if not maint.file.closed:
+                    maint.file.close()
